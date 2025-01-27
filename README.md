@@ -6,13 +6,18 @@ root (hd0,0)
 
 kernel /kernel-5 ro
 
+----------------------------------------------------------
+
 DubrDOS is a simple, educational operating system designed to run in low-level environments. It provides basic command-line functionality, games, and system utilities to demonstrate OS concepts like hardware interaction, keyboard handling, and text-based UI.
+
+-----------------------------------------------------------
 
 Features
 Command-line Interface:
-
 Execute commands directly from the terminal.
 Handle keyboard input, backspace, and enter commands.
+
+-------------------------------------------------------------
 
 Basic Commands
 
@@ -23,13 +28,19 @@ setcolor <foreground> <background>: Change the text and background colors.
 calc <number1> <operator> <number2>: Perform basic arithmetic operations (+, -, *, /).
 tictactoe: Play a simple game of Tic-Tac-Toe.
 
+----------------------------------------------------------------
+
 Tic-Tac-Toe Game
 
 Interactive two-player game.
 Move commands allow players to make their moves (e.g., move 1 1).
 Customizable Display:
 
+-----------------------------------------------------------------
+
 Change text and background colors using the setcolor command.
+
+--------------------------------------------------------------
 Keyboard Input Handling:
 
 Dynamically process input characters and handle special keys (like backspace).
@@ -40,6 +51,8 @@ Compiler: A cross-compiler for x86 (e.g., GCC targeting i386).
 Assembler: NASM (Netwide Assembler) for assembly language files.
 Steps
 
+---------------------------------------------------------------------
+
 Build the Kernel:
 
 nasm -f elf32 kernel.asm -o kasm.o
@@ -49,6 +62,8 @@ gcc -m32 -c kernel.c -o kc.o
 ld -T link.ld -o k kasm.o kc.o -build-id=none
 
 objcopy -O elf32-i386 k kernel-5
+
+-----------------------------------------------------------------------
 
 Commands Overview
 Command	Description
@@ -66,6 +81,8 @@ calc <num1> <op> <num2>	Performs a calculation. Example: calc 5 + 3. Supports +,
 tictactoe	Starts the Tic-Tac-Toe game.
 
 move <row> <col>	Makes a move in Tic-Tac-Toe. Example: move 1 1.
+
+-------------------------------------------------------
 
 Color Options for setcolor
 
@@ -87,6 +104,8 @@ brown	6	light_magenta	13
 
 yellow	14	white	15
 
+-----------------------------------------------------------
+
 Project Structure
 
 kernel.asm: The bootloader that initializes the system and loads the kernel.
@@ -97,11 +116,15 @@ Start the system by running the OS image in an emulator.
 Use the help command to discover available functionality.
 Customize the display using setcolor to make your terminal unique.
 
+-----------------------------------------------------
+
 License
 
 This project is intended for educational purposes. You are free to modify, redistribute, and experiment with the code as needed.
 
 Enjoy learning about low-level systems with DubrDOS! 🎉
+
+-----------------------------------------------------------
 
 grub:
 
