@@ -35,30 +35,48 @@ Steps
 Build the Kernel:
 
 nasm -f elf32 kernel.asm -o kasm.o
+
 gcc -m32 -c kernel.c -o kc.o
+
 ld -T link.ld -o k kasm.o kc.o -build-id=none
+
 objcopy -O elf32-i386 k kernel-5
 
 Commands Overview
 Command	Description
+
 cls	Clears the screen.
+
 help	Displays a list of available commands.
+
 shutdown	Simulates a system shutdown.
+
 setcolor <fg> <bg>	Changes the text (fg) and background (bg) colors. Example: setcolor red black.
+
 calc <num1> <op> <num2>	Performs a calculation. Example: calc 5 + 3. Supports +, -, *, /.
+
 tictactoe	Starts the Tic-Tac-Toe game.
+
 move <row> <col>	Makes a move in Tic-Tac-Toe. Example: move 1 1.
 
 Color Options for setcolor
 
 Color Name	Code	Color Name	Code
+
 black	0	light_gray	7
+
 blue	1	dark_gray	8
+
 green	2	light_blue	9
+
 cyan	3	light_green	10
+
 red	4	light_cyan	11
+
 magenta	5	light_red	12
+
 brown	6	light_magenta	13
+
 yellow	14	white	15
 
 Project Structure
