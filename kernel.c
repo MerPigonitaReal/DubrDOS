@@ -12,34 +12,13 @@
 #define KEYBOARD_STATUS_PORT 0x64
 #define BACKSPACE_SCANCODE 0x0E
 #define DELETE_SCANCODE 0x53
-#define COLOR_ATTRIBUTE (text_color | (bg_color << 4))
-// Color codes
-#define BLACK 0x0
-#define BLUE 0x1
-#define GREEN 0x2
-#define CYAN 0x3
-#define RED 0x4
-#define MAGENTA 0x5
-#define BROWN 0x6
-#define LIGHT_GRAY 0x7
-#define DARK_GRAY 0x8
-#define LIGHT_BLUE 0x9
-#define LIGHT_GREEN 0xA
-#define LIGHT_CYAN 0xB
-#define LIGHT_RED 0xC
-#define LIGHT_MAGENTA 0xD
-#define YELLOW 0xE
-#define WHITE 0xF
-#define BIOS_MEMORY_LOCATION 0x413 // Memory size (KB)
 
 // Globals
 static char input_buffer[256];
 static size_t input_index = 0;
 static uint16_t cursor_pos = 0;
-static uint8_t text_color = WHITE;
-static uint8_t bg_color = BLUE;
-
-
+static uint8_t text_color = 0xF;  // Default: white
+static uint8_t bg_color = 0x1;   // Default: blue
 // Function Prototypes
 void init_system(void);
 void clear_screen(void);
@@ -51,6 +30,7 @@ void print_char(char c);
 uint16_t get_cursor_row(void);
 uint16_t get_cursor_col(void);
 void execute_command(const char *command);
+int color_code_from_name(const char *name);
 
 // I/O Port Access Functions
 static inline void outb(uint16_t port, uint8_t value) {
@@ -172,26 +152,6 @@ void itoa(int value, char *str, int base) {
     }
     str[j] = '\0';
 }
-// Function to convert color name to numeric value
-int color_code_from_name(const char *name) {
-    if (strcmp(name, "black") == 0) return 0;
-    if (strcmp(name, "blue") == 0) return 1;
-    if (strcmp(name, "green") == 0) return 2;
-    if (strcmp(name, "cyan") == 0) return 3;
-    if (strcmp(name, "red") == 0) return 4;
-    if (strcmp(name, "magenta") == 0) return 5;
-    if (strcmp(name, "brown") == 0) return 6;
-    if (strcmp(name, "light_gray") == 0) return 7;
-    if (strcmp(name, "dark_gray") == 0) return 8;
-    if (strcmp(name, "light_blue") == 0) return 9;
-    if (strcmp(name, "light_green") == 0) return 10;
-    if (strcmp(name, "light_cyan") == 0) return 11;
-    if (strcmp(name, "light_red") == 0) return 12;
-    if (strcmp(name, "light_magenta") == 0) return 13;
-    if (strcmp(name, "yellow") == 0) return 14;
-    if (strcmp(name, "white") == 0) return 15;
-    return -1; // Invalid name
-}
 
 void snprintf(char *str, size_t size, const char *format, int value) {
     const char *p = format;
@@ -212,24 +172,21 @@ void snprintf(char *str, size_t size, const char *format, int value) {
     *out = '\0'; // Null-terminate the string
 }
 
-// Clear the screen and repaint the entire background
 void clear_screen(void) {
     uint16_t *video_memory = (uint16_t *)VIDEO_MEMORY;
-    uint16_t blank = ' ' | (COLOR_ATTRIBUTE << 8); // Use current COLOR_ATTRIBUTE for blank spaces
+    uint16_t blank = ' ' | ((text_color | (bg_color << 4)) << 8);
     for (int i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++) {
-        video_memory[i] = blank; // Fill with blank spaces and current background color
+        video_memory[i] = blank;
     }
     cursor_pos = 3 * SCREEN_WIDTH; // Start input on line 3
     update_cursor(cursor_pos);
 }
 
-
-// Display a string at a specific row and column
 void display_text(const char *text, uint16_t row, uint16_t col) {
     uint16_t *video_memory = (uint16_t *)VIDEO_MEMORY;
     uint16_t offset = row * SCREEN_WIDTH + col;
     while (*text) {
-        video_memory[offset++] = *text | (COLOR_ATTRIBUTE << 8);
+        video_memory[offset++] = *text | ((text_color | (bg_color << 4)) << 8);
         text++;
     }
 }
@@ -241,10 +198,9 @@ void print_char(char c) {
     if (c == '\n') {
         cursor_pos = (cursor_pos / SCREEN_WIDTH + 1) * SCREEN_WIDTH; // Move to the next row
     } else {
-        video_memory[cursor_pos++] = c | (COLOR_ATTRIBUTE << 8);
+        video_memory[cursor_pos++] = c | ((text_color | (bg_color << 4)) << 8);
     }
 
-    // Update cursor and wrap around if needed
     if (cursor_pos >= SCREEN_WIDTH * SCREEN_HEIGHT) {
         cursor_pos = 3 * SCREEN_WIDTH; // Reset to line 3
     }
@@ -485,87 +441,109 @@ void shutdown_system(void) {
     // Issue halt instruction
     __asm__ __volatile__("cli; hlt");
 }
-// Function to get CPU vendor
-void get_cpu_vendor(char *vendor) {
-    uint32_t eax, ebx, ecx, edx;
-    eax = 0; // CPUID with EAX=0 gets vendor string
-    __asm__ __volatile__(
-        "cpuid"
-        : "=b"(ebx), "=c"(ecx), "=d"(edx)
-        : "a"(eax)
-    );
-    *(uint32_t *)(vendor + 0) = ebx;
-    *(uint32_t *)(vendor + 4) = edx;
-    *(uint32_t *)(vendor + 8) = ecx;
-    vendor[12] = '\0'; // Null-terminate the string
-}
-
-// Function to get installed memory size
-int get_memory_size_kb(void) {
-    return *((uint16_t *)BIOS_MEMORY_LOCATION); // BIOS memory location 0x413
-}
-
-// Display PC characteristics
-void display_sysinfo(void) {
-    char vendor[13];
-    get_cpu_vendor(vendor);
-
-    int memory_size_kb = get_memory_size_kb();
-    char mem_buffer[32];
-
-    // Display system info
-    display_text("System Information:", get_cursor_row(), 0);
-    display_text("CPU Vendor: ", get_cursor_row() + 1, 0);
-    display_text(vendor, get_cursor_row() + 1, 12);
-
-    snprintf(mem_buffer, sizeof(mem_buffer), "Memory: %d KB", memory_size_kb);
-    display_text(mem_buffer, get_cursor_row() + 2, 0);
-
-    cursor_pos = (get_cursor_row() + 4) * SCREEN_WIDTH; // Move cursor below info
-    update_cursor(cursor_pos);
-}
-
-// Execute commands (extended with sysinfo)
+// Execute commands (extended with tictactoe)
 void execute_command(const char *command) {
     if (strcmp(command, "cls") == 0) {
         clear_screen();
-    } else if (strcmp(command, "shutdown") == 0) {
-        shutdown_system();
-    } else if (strcmp(command, "help") == 0) {
-        display_text("Available commands:", get_cursor_row(), 0);
-        display_text("cls - clear screen", get_cursor_row() + 1, 0);
-        display_text("shutdown - shut down the system", get_cursor_row() + 2, 0);
-        display_text("tictactoe - play Tic-Tac-Toe", get_cursor_row() + 3, 0);
-        display_text("move - make a move in Tic-Tac-Toe", get_cursor_row() + 4, 0);
-        display_text("setcolor - change text and background colors", get_cursor_row() + 5, 0);
-        display_text("sysinfo - display system information", get_cursor_row() + 6, 0);
-
-        // Move cursor below the displayed text
-        cursor_pos = (get_cursor_row() + 7) * SCREEN_WIDTH;
-        update_cursor(cursor_pos);
-    } else if (strcmp(command, "sysinfo") == 0) {
-        display_sysinfo();
     } else if (strncmp(command, "setcolor ", 9) == 0) {
         char *args = (char *)command + 9;
         char *fg_str = strtok(args, " ");
         char *bg_str = strtok(NULL, " ");
+
         if (fg_str && bg_str) {
             int fg = color_code_from_name(fg_str);
             int bg = color_code_from_name(bg_str);
+
             if (fg != -1 && bg != -1) {
                 text_color = fg;
                 bg_color = bg;
                 clear_screen();
-                display_text("Color updated!", get_cursor_row(), 0);
+                display_text("Colors updated successfully!", get_cursor_row(), 0);
             } else {
-                display_text("Invalid color names! Use valid names (e.g., red white).", get_cursor_row(), 0);
+                display_text("Invalid color names!", get_cursor_row(), 0);
             }
         } else {
-            display_text("Invalid syntax! Use setcolor <foreground> <background>.", get_cursor_row(), 0);
+            display_text("Usage: setcolor <fg> <bg>", get_cursor_row(), 0);
+        }
+    } else if (strcmp(command, "shutdown") == 0) {
+        shutdown_system(); // Call shutdown
+    } else if (strcmp(command, "help") == 0) {
+        display_text("Available commands:", get_cursor_row() - 1, 0);
+        display_text("cls - clear screen", get_cursor_row(), 0);
+        display_text("shutdown - shut down the system", get_cursor_row() + 1, 0);
+        display_text("tictactoe - play Tic-Tac-Toe", get_cursor_row() + 2, 0);
+        display_text("move - make a move in Tic-Tac-Toe", get_cursor_row() + 3, 0);
+        display_text("calc 1 + 1 - calculator", get_cursor_row() + 4, 0);
+        display_text("setcolor - set text and bg color", get_cursor_row() + 5, 0);
+
+        // Move cursor below the displayed text
+        cursor_pos = (get_cursor_row() + 5) * SCREEN_WIDTH; // 5 lines of help text
+        update_cursor(cursor_pos);
+    } else if (strncmp(command, "calc ", 5) == 0) {
+        char *args = (char *)command + 5;
+        char *op1_str = strtok(args, " ");
+        char *op_str = strtok(NULL, " ");
+        char *op2_str = strtok(NULL, " ");
+
+        if (op1_str && op_str && op2_str) {
+            int op1 = atoi(op1_str);
+            int op2 = atoi(op2_str);
+            int result = 0;
+
+            if (strcmp(op_str, "+") == 0) {
+                result = op1 + op2;
+            } else if (strcmp(op_str, "-") == 0) {
+                result = op1 - op2;
+            } else if (strcmp(op_str, "*") == 0) {
+                result = op1 * op2;
+            } else if (strcmp(op_str, "/") == 0 && op2 != 0) {
+                result = op1 / op2;
+            } else {
+                display_text("Invalid operator or division by zero!", get_cursor_row(), 0);
+                return;
+            }
+
+            char result_text[64];
+            snprintf(result_text, sizeof(result_text), "Result: %d", result);
+            display_text(result_text, get_cursor_row(), 0);
+        } else {
+            display_text("Invalid calculator syntax!", get_cursor_row(), 0);
+        }
+    } else if (strcmp(command, "tictactoe") == 0) {
+        start_tictactoe();
+    } else if (strncmp(command, "move ", 5) == 0) {
+        char *args = (char *)command + 5;
+        char *row_str = strtok(args, " ");
+        char *col_str = strtok(NULL, " ");
+        if (row_str && col_str) {
+            int row = atoi(row_str);
+            int col = atoi(col_str);
+            make_move(row, col);
+        } else {
+            display_text("Invalid move syntax! Use move row col.", get_cursor_row(), 0);
         }
     } else {
         display_text("Unknown command!", get_cursor_row(), 0);
     }
+}
+int color_code_from_name(const char *name) {
+    if (strcmp(name, "black") == 0) return 0;
+    if (strcmp(name, "blue") == 0) return 1;
+    if (strcmp(name, "green") == 0) return 2;
+    if (strcmp(name, "cyan") == 0) return 3;
+    if (strcmp(name, "red") == 0) return 4;
+    if (strcmp(name, "magenta") == 0) return 5;
+    if (strcmp(name, "brown") == 0) return 6;
+    if (strcmp(name, "light_gray") == 0) return 7;
+    if (strcmp(name, "dark_gray") == 0) return 8;
+    if (strcmp(name, "light_blue") == 0) return 9;
+    if (strcmp(name, "light_green") == 0) return 10;
+    if (strcmp(name, "light_cyan") == 0) return 11;
+    if (strcmp(name, "light_red") == 0) return 12;
+    if (strcmp(name, "light_magenta") == 0) return 13;
+    if (strcmp(name, "yellow") == 0) return 14;
+    if (strcmp(name, "white") == 0) return 15;
+    return -1;
 }
 
 
