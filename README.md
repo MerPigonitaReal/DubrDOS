@@ -1,3 +1,8 @@
+grub:
+title kernel-5
+root (hd0,0)
+kernel /kernel-5 ro
+
 DubrDOS is a simple, educational operating system designed to run in low-level environments. It provides basic command-line functionality, games, and system utilities to demonstrate OS concepts like hardware interaction, keyboard handling, and text-based UI.
 
 Features
@@ -94,3 +99,8 @@ License
 This project is intended for educational purposes. You are free to modify, redistribute, and experiment with the code as needed.
 
 Enjoy learning about low-level systems with DubrDOS! 🎉
+
+grub:
+title kernel-5
+root (hd0,0)
+kernel /kernel-5 ro
