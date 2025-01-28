@@ -12,12 +12,23 @@
 #define KEYBOARD_STATUS_PORT 0x64
 #define BACKSPACE_SCANCODE 0x0E
 #define DELETE_SCANCODE 0x53
+#define MAX_VARS 10
+#define VAR_NAME_LEN 32
+#define VAR_VALUE_LEN 32
 
 // Globals
+typedef struct {
+    char name[VAR_NAME_LEN];
+    char value[VAR_VALUE_LEN];
+} Variable;
+
+Variable variables[MAX_VARS];
+size_t var_count = 0;
 static char input_buffer[256];
 static size_t input_index = 0;
 static uint16_t cursor_pos = 0;
 static uint8_t text_color = 0xF;  // Default: white
+static uint8_t text_color1 = 0xF;  // Default: white
 static uint8_t bg_color = 0x1;   // Default: blue
 static char splash_screen[80] = "Welcome to DubrDos!"; // Default splash screen
 // Function Prototypes
@@ -29,6 +40,10 @@ void update_cursor(uint16_t position);
 void process_input(void);
 void print_char(char c);
 void set_splash(const char *new_splash);
+void create_variable(const char *name, const char *value);
+char *get_variable_value(const char *name);
+void print_color_text(const char *text, const char *color_name);
+void set_color_splash(const char *color_name);
 uint16_t get_cursor_row(void);
 uint16_t get_cursor_col(void);
 void execute_command(const char *command);
@@ -176,14 +191,22 @@ void itoa(int value, char *str, int base) {
     str[j] = '\0';
 }
 
-void snprintf(char *str, size_t size, const char *format, int value) {
+void snprintf(char *str, size_t size, const char *format, const char *str_value, int int_value) {
     const char *p = format;
     char *out = str;
 
     while (*p && (out - str) < (size - 1)) {
-        if (*p == '%' && *(p + 1) == 'd') {
+        if (*p == '%' && *(p + 1) == 's') {
+            // Handle string
+            const char *s = str_value;
+            while (*s && (out - str) < (size - 1)) {
+                *out++ = *s++;
+            }
+            p += 2; // Skip %s
+        } else if (*p == '%' && *(p + 1) == 'd') {
+            // Handle integer
             char num_buffer[32];
-            itoa(value, num_buffer, 10);
+            itoa(int_value, num_buffer, 10);
             for (char *q = num_buffer; *q && (out - str) < (size - 1); q++) {
                 *out++ = *q;
             }
@@ -194,6 +217,7 @@ void snprintf(char *str, size_t size, const char *format, int value) {
     }
     *out = '\0'; // Null-terminate the string
 }
+
 
 void clear_screen(void) {
     uint16_t *video_memory = (uint16_t *)VIDEO_MEMORY;
@@ -410,7 +434,8 @@ void make_move(int row, int col) {
     if (check_winner()) {
         display_board();
         char result_text[32];
-        snprintf(result_text, sizeof(result_text), "Player %c wins!", current_player);
+        char current_player_str[2] = { current_player, '\0' }; // Convert char to string
+        snprintf(result_text, sizeof(result_text), "Player %s wins!", current_player_str, 0);
         display_text(result_text, get_cursor_row(), 0);
         reset_board();
         return;
@@ -461,6 +486,82 @@ void reset_board(void) {
         }
     }
 }
+// Function to create a variable
+void create_variable(const char *name, const char *value) {
+    if (var_count < MAX_VARS) {
+        strncpy(variables[var_count].name, name, VAR_NAME_LEN - 1);
+        variables[var_count].name[VAR_NAME_LEN - 1] = '\0'; // Ensure null termination
+        strncpy(variables[var_count].value, value, VAR_VALUE_LEN - 1);
+        variables[var_count].value[VAR_VALUE_LEN - 1] = '\0'; // Ensure null termination
+        var_count++;
+        display_text("Variable created!", get_cursor_row(), 0);
+    } else {
+        display_text("Variable limit reached!", get_cursor_row(), 0);
+    }
+}
+
+// Function to get a variable's value
+char *get_variable_value(const char *name) {
+    for (size_t i = 0; i < var_count; i++) {
+        if (strcmp(variables[i].name, name) == 0) {
+            return variables[i].value;
+        }
+    }
+    return NULL; // Variable not found
+}
+// Function to display all variables
+void display_variables(void) {
+    for (size_t i = 0; i < var_count; i++) {
+        char output[VAR_NAME_LEN + VAR_VALUE_LEN + 10]; // Buffer for output
+        snprintf(output, sizeof(output), "%s: %s", variables[i].name, variables[i].value);
+        display_text(output, get_cursor_row(), 0);
+    }
+    cursor_pos = (get_cursor_row() + var_count + 1) * SCREEN_WIDTH; // Move cursor below displayed variables
+    update_cursor(cursor_pos);
+}
+
+// Function to fill the screen area with a specified character and color
+void fill_area(char fill_char, uint8_t fg_color, uint8_t bg_color, uint16_t start_row, uint16_t start_col, uint16_t height, uint16_t width) {
+    uint16_t *video_memory = (uint16_t *)VIDEO_MEMORY;
+    uint16_t offset;
+    for (uint16_t row = 0; row < height; row++) {
+        for (uint16_t col = 0; col < width; col++) {
+            offset = (start_row + row) * SCREEN_WIDTH + (start_col + col);
+            if (offset < SCREEN_WIDTH * SCREEN_HEIGHT) { // Ensure we don't go out of bounds
+                video_memory[offset] = fill_char | ((fg_color | (bg_color << 4)) << 8);
+            }
+        }
+    }
+    cursor_pos = (start_row + height) * SCREEN_WIDTH; // Move cursor below filled area
+    update_cursor(cursor_pos);
+}
+// Function to print text in a specified color
+void print_color_text(const char *text, const char *color_name) {
+    int color_code = color_code_from_name(color_name);
+    if (color_code == -1) {
+        display_text("Invalid color name!", get_cursor_row() + 1, 0);
+        return;
+    }
+    uint16_t *video_memory = (uint16_t *)VIDEO_MEMORY;
+    uint16_t offset = cursor_pos; // Use current cursor position
+    while (*text) {
+        video_memory[offset++] = *text | ((color_code | (bg_color << 4)) << 8);
+        text++;
+    }
+    cursor_pos = offset; // Update cursor position
+    update_cursor(cursor_pos);
+}
+
+// Function to set the splash screen color
+void set_color_splash(const char *color_name) {
+    int color_code = color_code_from_name(color_name);
+    if (color_code == -1) {
+        display_text("Invalid color name!", get_cursor_row(), 0);
+        return;
+    }
+    text_color1 = color_code;
+    display_text("Splash text color updated!", get_cursor_row(), 0);
+}
 // Pause Execution
 void pause_com(void) {
     display_text("Press any key to continue...", get_cursor_row(), 0);
@@ -509,10 +610,41 @@ void execute_command(const char *command) {
         display_text("setcolor - set text and bg color",get_cursor_row() + 6, 0);
         display_text("pause - pause",get_cursor_row() + 7, 0);
         display_text("setsplash <text> - set splash screen",get_cursor_row() + 8, 0);
+        display_text("printcolortext <color> <text> - print text in color", get_cursor_row() + 9, 0);
+        display_text("setcolorsplash <color> - set splash text color", get_cursor_row() + 10, 0);
+        display_text("createvar <name> <value> - create a variable", get_cursor_row() + 11, 0);
+        display_text("var <name> <value> - assign a value to a variable", get_cursor_row() + 12, 0);
+        display_text("showvars - Displays all defined variables and their values", get_cursor_row() + 13, 0);
+        display_text("fill <char> <fg_color> <bg_color> <height> <width> - Fills a specified area with a character and colors", get_cursor_row() + 14, 0);
 
         // Move cursor below the displayed text
-        cursor_pos = (get_cursor_row() + 9) * SCREEN_WIDTH; // 5 lines of help text
+        cursor_pos = (get_cursor_row() + 16) * SCREEN_WIDTH; // 5 lines of help text
         update_cursor(cursor_pos);
+    } else if (strcmp(command, "showvars") == 0) {
+        display_variables(); // Show all variables
+    } else if (strncmp(command, "fill ", 5) == 0) {
+        clear_screen();
+        char *args = (char *)command + 5;
+        char *fill_char_str = strtok(args, " ");
+        char *fg_color_str = strtok(NULL, " ");
+        char *bg_color_str = strtok(NULL, " ");
+        char *dimensions_str = strtok(NULL, " ");
+
+        if (fill_char_str && fg_color_str && bg_color_str && dimensions_str) {
+            char fill_char = fill_char_str[0]; // Take the first character as the fill character
+            int fg_color = color_code_from_name(fg_color_str);
+            int bg_color = color_code_from_name(bg_color_str);
+            int height = atoi(dimensions_str);
+            int width = atoi(strtok(NULL, " ")); // Get width from the next token
+
+            if (fg_color != -1 && bg_color != -1) {
+                fill_area(fill_char, fg_color, bg_color, 1, 1, height, width);
+            } else {
+                display_text("Invalid color names!", get_cursor_row(), 0);
+            }
+        } else {
+            display_text("Usage: fill <char> <fg_color> <bg_color> <height> <width>", get_cursor_row(), 0);
+        }
     } else if (strncmp(command, "calc ", 5) == 0) {
         char *args = (char *)command + 5;
         char *op1_str = strtok(args, " ");
@@ -538,7 +670,7 @@ void execute_command(const char *command) {
             }
 
             char result_text[64];
-            snprintf(result_text, sizeof(result_text), "Result: %d", result);
+            snprintf(result_text, sizeof(result_text), "Result: %d", 0, result);
             display_text(result_text, get_cursor_row(), 0);
         } else {
             display_text("Invalid calculator syntax!", get_cursor_row(), 0);
@@ -561,6 +693,41 @@ void execute_command(const char *command) {
             make_move(row, col);
         } else {
             display_text("Invalid move syntax! Use move row col.", get_cursor_row(), 0);
+        }
+    } else if (strncmp(command, "printcolortext ", 15) == 0) {
+        char *args = (char *)command + 15;
+        char *color_name = strtok(args, " ");
+        char *text = strtok(NULL, "\0"); // Get the rest of the string as text
+        if (color_name && text) {
+            print_color_text(text, color_name);
+        } else {
+            display_text("Usage: printcolortext <color> <text>", get_cursor_row(), 0);
+        }
+    } else if (strncmp(command, "setcolorsplash ", 15) == 0) {
+        char *args = (char *)command + 15;
+        char *color_name = strtok(args, " ");
+        if (color_name) {
+            set_color_splash(color_name);
+        } else {
+            display_text("Usage: setcolorsplash <color>", get_cursor_row(), 0);
+        }
+    } else if (strncmp(command, "createvar ", 10) == 0) {
+        char *args = (char *)command + 10;
+        char *var_name = strtok(args, " ");
+        char *var_value = strtok(NULL, "\0"); // Get the rest of the string as value
+        if (var_name && var_value) {
+            create_variable(var_name, var_value);
+        } else {
+            display_text("Usage: createvar <name> <value>", get_cursor_row(), 0);
+        }
+    } else if (strncmp(command, "var", 5) == 0) {
+        char *args = (char *)command + 5;
+        char *var_name = strtok(args, " ");
+        char *var_value = strtok(NULL, "\0"); // Get the rest of the string as value
+        if (var_name && var_value) {
+            create_variable(var_name, var_value);
+        } else {
+            display_text("Usage: var = <name> <value>", get_cursor_row(), 0);
         }
     } else {
         display_text("Unknown command! Enter help!", get_cursor_row(), 0);
