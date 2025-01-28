@@ -19,6 +19,7 @@ static size_t input_index = 0;
 static uint16_t cursor_pos = 0;
 static uint8_t text_color = 0xF;  // Default: white
 static uint8_t bg_color = 0x1;   // Default: blue
+static char splash_screen[80] = "Welcome to DubrDos!"; // Default splash screen
 // Function Prototypes
 void init_system(void);
 void clear_screen(void);
@@ -27,6 +28,7 @@ void handle_keyboard(void);
 void update_cursor(uint16_t position);
 void process_input(void);
 void print_char(char c);
+void set_splash(const char *new_splash);
 uint16_t get_cursor_row(void);
 uint16_t get_cursor_col(void);
 void execute_command(const char *command);
@@ -63,6 +65,27 @@ int atoi(const char *str) {
 
     return sign * result;
 }
+// Custom implementation of strncpy
+char *strncpy(char *dest, const char *src, size_t n) {
+    size_t i;
+    for (i = 0; i < n && src[i] != '\0'; i++) {
+        dest[i] = src[i];
+    }
+    for (; i < n; i++) {
+        dest[i] = '\0';
+    }
+    return dest;
+}
+
+// Custom implementation of strlen
+size_t strlen(const char *str) {
+    size_t len = 0;
+    while (str[len] != '\0') {
+        len++;
+    }
+    return len;
+}
+
 int strcmp(const char *str1, const char *str2) {
     while (*str1 && (*str1 == *str2)) {
         str1++;
@@ -190,7 +213,12 @@ void display_text(const char *text, uint16_t row, uint16_t col) {
         text++;
     }
 }
-
+// Function to set a new splash screen
+void set_splash(const char *new_splash) {
+    strncpy(splash_screen, new_splash, sizeof(splash_screen) - 1);
+    splash_screen[sizeof(splash_screen) - 1] = '\0'; // Ensure null termination
+    display_text("Splash updated!", get_cursor_row(), 0);
+}
 // Print a single character to the screen at the current cursor position
 void print_char(char c) {
     uint16_t *video_memory = (uint16_t *)VIDEO_MEMORY;
@@ -433,7 +461,11 @@ void reset_board(void) {
         }
     }
 }
-
+// Pause Execution
+void pause_com(void) {
+    display_text("Press any key to continue...", get_cursor_row(), 0);
+    while (!(inb(KEYBOARD_STATUS_PORT) & 0x01)); // Wait for key press
+}
 
 // Shutdown Command
 void shutdown_system(void) {
@@ -468,16 +500,18 @@ void execute_command(const char *command) {
     } else if (strcmp(command, "shutdown") == 0) {
         shutdown_system(); // Call shutdown
     } else if (strcmp(command, "help") == 0) {
-        display_text("Available commands:", get_cursor_row() - 1, 0);
-        display_text("cls - clear screen", get_cursor_row(), 0);
-        display_text("shutdown - shut down the system", get_cursor_row() + 1, 0);
-        display_text("tictactoe - play Tic-Tac-Toe", get_cursor_row() + 2, 0);
-        display_text("move - make a move in Tic-Tac-Toe", get_cursor_row() + 3, 0);
-        display_text("calc 1 + 1 - calculator", get_cursor_row() + 4, 0);
-        display_text("setcolor - set text and bg color", get_cursor_row() + 5, 0);
+        display_text("Available commands:",get_cursor_row(), 0);
+        display_text("cls - clear screen",get_cursor_row() + 1, 0);
+        display_text("shutdown - shut down the system",get_cursor_row() + 2, 0);
+        display_text("tictactoe - play Tic-Tac-Toe",get_cursor_row() + 3, 0);
+        display_text("move - make a move in Tic-Tac-Toe",get_cursor_row() + 4, 0);
+        display_text("calc 1 + 1 - calculator",get_cursor_row() + 5, 0);
+        display_text("setcolor - set text and bg color",get_cursor_row() + 6, 0);
+        display_text("pause - pause",get_cursor_row() + 7, 0);
+        display_text("setsplash <text> - set splash screen",get_cursor_row() + 8, 0);
 
         // Move cursor below the displayed text
-        cursor_pos = (get_cursor_row() + 5) * SCREEN_WIDTH; // 5 lines of help text
+        cursor_pos = (get_cursor_row() + 9) * SCREEN_WIDTH; // 5 lines of help text
         update_cursor(cursor_pos);
     } else if (strncmp(command, "calc ", 5) == 0) {
         char *args = (char *)command + 5;
@@ -509,6 +543,12 @@ void execute_command(const char *command) {
         } else {
             display_text("Invalid calculator syntax!", get_cursor_row(), 0);
         }
+    } else if (strncmp(command, "setsplash ", 10) == 0) {
+        const char *new_splash = command + 10; // Get the new splash text
+        set_splash(new_splash);
+        clear_screen();
+    } else if (strcmp(command, "pause") == 0) {
+        pause_com();
     } else if (strcmp(command, "tictactoe") == 0) {
         start_tictactoe();
     } else if (strncmp(command, "move ", 5) == 0) {
@@ -523,7 +563,7 @@ void execute_command(const char *command) {
             display_text("Invalid move syntax! Use move row col.", get_cursor_row(), 0);
         }
     } else {
-        display_text("Unknown command!", get_cursor_row(), 0);
+        display_text("Unknown command! Enter help!", get_cursor_row(), 0);
     }
 }
 int color_code_from_name(const char *name) {
@@ -566,7 +606,7 @@ void init_system(void) {
 void kmain(void) {
     init_system();
     while (1) {
-        display_text("Welcome to DubrDos!", 0, 23);
         handle_keyboard(); // Poll for keyboard input
+        display_text(splash_screen, 0, (SCREEN_WIDTH - strlen(splash_screen)) / 2);
     }
 }
