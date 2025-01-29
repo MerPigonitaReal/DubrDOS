@@ -15,7 +15,10 @@
 #define MAX_VARS 10
 #define VAR_NAME_LEN 32
 #define VAR_VALUE_LEN 32
+#define MAX_HISTORY 1000
 
+uint16_t screen_history[MAX_HISTORY][SCREEN_WIDTH]; // Buffer for storing history
+size_t history_count = 0; // Number of stored lines
 // Globals
 typedef struct {
     char name[VAR_NAME_LEN];
@@ -250,15 +253,41 @@ void print_char(char c) {
     if (c == '\n') {
         cursor_pos = (cursor_pos / SCREEN_WIDTH + 1) * SCREEN_WIDTH; // Move to the next row
     } else {
-        video_memory[cursor_pos++] = c | ((text_color | (bg_color << 4)) << 8);
+        video_memory[cursor_pos] = c | ((text_color | (bg_color << 4)) << 8);
+        cursor_pos++; // Move cursor forward
     }
 
+    // Prevent cursor from going out of screen bounds
     if (cursor_pos >= SCREEN_WIDTH * SCREEN_HEIGHT) {
-        cursor_pos = 3 * SCREEN_WIDTH; // Reset to line 3
+        scroll_screen();
+        cursor_pos -= SCREEN_WIDTH;
     }
+
     update_cursor(cursor_pos);
 }
 
+void scroll_screen(void) {
+    uint16_t *video_memory = (uint16_t *)VIDEO_MEMORY;
+
+    // Save the topmost line before it scrolls off
+    if (history_count < MAX_HISTORY) {
+        memcpy(screen_history[history_count], video_memory, SCREEN_WIDTH * sizeof(uint16_t));
+        history_count++;
+    }
+
+    // Move lines up
+    for (int i = 0; i < (SCREEN_HEIGHT - 1) * SCREEN_WIDTH; i++) {
+        video_memory[i] = video_memory[i + SCREEN_WIDTH];
+    }
+
+    // Clear the last line
+    for (int i = (SCREEN_HEIGHT - 1) * SCREEN_WIDTH; i < SCREEN_HEIGHT * SCREEN_WIDTH; i++) {
+        video_memory[i] = ' ' | (WHITE_ON_BLUE << 8);
+    }
+
+    cursor_pos -= SCREEN_WIDTH; // Adjust cursor
+    update_cursor(cursor_pos);
+}
 // Update the hardware cursor position
 void update_cursor(uint16_t position) {
     outb(0x3D4, 0x0F);
@@ -277,19 +306,76 @@ uint16_t get_cursor_col(void) {
     return cursor_pos % SCREEN_WIDTH;
 }
 
-// Handle keyboard input
+void scroll_screen_up(void) {
+    uint16_t *video_memory = (uint16_t *)VIDEO_MEMORY;
+
+    if (history_count > 0) {
+        // Move lines down
+        for (int i = (SCREEN_HEIGHT - 1) * SCREEN_WIDTH; i >= SCREEN_WIDTH; i--) {
+            video_memory[i] = video_memory[i - SCREEN_WIDTH];
+        }
+
+        // Restore the last stored line
+        history_count--;
+        memcpy(video_memory, screen_history[history_count], SCREEN_WIDTH * sizeof(uint16_t));
+
+        cursor_pos += SCREEN_WIDTH;
+        update_cursor(cursor_pos);
+    }
+}
+void *memcpy(void *dest, const void *src, size_t n) {
+    char *d = (char *)dest;
+    const char *s = (const char *)src;
+    for (size_t i = 0; i < n; i++) {
+        d[i] = s[i];
+    }
+    return dest;
+}
+
+
 void handle_keyboard(void) {
     if ((inb(KEYBOARD_STATUS_PORT) & 0x01) == 0) {
         return;
     }
 
     uint8_t scancode = inb(KEYBOARD_DATA_PORT);
+
     if (scancode & 0x80) {
-        return; // Ignore key release
+        return; // Игнорируем отпускание клавиши
     }
 
     char key = '\0';
+
     switch (scancode) {
+        case 0x48: // Up arrow
+            if (get_cursor_row() > 0) {
+                cursor_pos -= SCREEN_WIDTH;
+                update_cursor(cursor_pos);
+            } else {
+                scroll_screen_up(); // Restore previous lines
+            }
+            return;
+
+        case 0x50: // Down arrow
+            if (get_cursor_row() < SCREEN_HEIGHT - 1) {
+                cursor_pos += SCREEN_WIDTH;
+                update_cursor(cursor_pos);
+            } else {
+                scroll_screen();  // Scroll normally
+            }
+            return;
+        case 0x4B: // Влево
+            if (get_cursor_col() > 0) {
+                cursor_pos--;
+                update_cursor(cursor_pos);
+            }
+            return;
+        case 0x4D: // Вправо
+            if (get_cursor_col() < SCREEN_WIDTH - 1) {
+                cursor_pos++;
+                update_cursor(cursor_pos);
+            }
+            return;
         case BACKSPACE_SCANCODE: // Backspace
             if (input_index > 0) {
                 input_index--;
@@ -307,8 +393,9 @@ void handle_keyboard(void) {
             }
             return;
 
+        // Ввод символов, включая специальные
         case 0x1C: key = '\n'; break; // Enter
-        case 0x39: key = ' '; break;  // Space
+        case 0x39: key = ' '; break;  // Пробел
         case 0x02: key = '1'; break;
         case 0x03: key = '2'; break;
         case 0x04: key = '3'; break;
@@ -346,11 +433,19 @@ void handle_keyboard(void) {
         case 0x31: key = 'n'; break;
         case 0x32: key = 'm'; break;
 
-        // New operators for calculator
-        case 0x4E: key = '-'; break; // '-'
-        case 0x4A: key = '/'; break; // '/'
-        case 0x37: key = '*'; break; // '*'
-        case 0x4C: key = '+'; break; // '+'
+        case 0x0C: key = '-'; break;  // '-' key
+        case 0x0D: key = '='; break;  // '=' key
+        case 0x1A: key = '['; break;
+        case 0x1B: key = ']'; break;
+        case 0x2B: key = '\\'; break;
+        case 0x27: key = ';'; break;
+        case 0x28: key = '\''; break;
+        case 0x33: key = ','; break;
+        case 0x34: key = '.'; break;
+        case 0x35: key = '/'; break;
+        case 0x37: key = '*'; break;  // '*' key
+        case 0x4A: key = '/'; break;  // '/' key
+        case 0x4E: key = '+'; break;  // '+' key
 
         default: break;
     }
@@ -363,10 +458,16 @@ void handle_keyboard(void) {
             if (input_index < sizeof(input_buffer) - 1) {
                 input_buffer[input_index++] = key;
                 print_char(key);
+
+                // Если курсор достиг низа экрана → прокручиваем
+                if (get_cursor_row() >= SCREEN_HEIGHT) {
+                    scroll_screen();
+                }
             }
         }
     }
 }
+
 
 
 // Globals for Tic-Tac-Toe
@@ -567,6 +668,10 @@ void pause_com(void) {
     display_text("Press any key to continue...", get_cursor_row(), 0);
     while (!(inb(KEYBOARD_STATUS_PORT) & 0x01)); // Wait for key press
 }
+void reboot_system(void) {
+    display_text("Rebooting system...", get_cursor_row(), 0);
+    __asm__ __volatile__("int $0x19"); // Trigger BIOS reboot
+}
 
 // Shutdown Command
 void shutdown_system(void) {
@@ -574,6 +679,70 @@ void shutdown_system(void) {
     // Issue halt instruction
     __asm__ __volatile__("cli; hlt");
 }
+void get_cpu_info(void) {
+    char cpu_vendor[13];
+    __asm__ __volatile__(
+        "cpuid"
+        : "=b"(cpu_vendor[0]), "=d"(cpu_vendor[4]), "=c"(cpu_vendor[8])
+        : "a"(0)
+    );
+    cpu_vendor[12] = '\0';
+
+    display_text("CPU Vendor: ", get_cursor_row(), 0);
+    display_text(cpu_vendor, get_cursor_row(), 12);
+}
+void get_memory_info(void) {
+    uint32_t mem_kb;
+    __asm__ __volatile__(
+        "int $0x15"
+        : "=c"(mem_kb)
+        : "a"(0xE820), "b"(0), "d"(0x534D4150)
+        : "memory"
+    );
+
+    char buffer[32];
+    itoa(mem_kb, buffer, 10);
+    display_text("Memory Size: ", get_cursor_row(), 0);
+    display_text(buffer, get_cursor_row(), 14);
+    display_text(" KB", get_cursor_row(), 20);
+}
+void get_uptime(void) {
+    uint32_t ticks;
+    __asm__ __volatile__("mov %%eax, %0" : "=r"(ticks));
+
+    char buffer[32];
+    itoa(ticks / 18, buffer, 10); // Convert to seconds (assuming 18.2 ticks per second)
+    display_text("Uptime: ", get_cursor_row(), 0);
+    display_text(buffer, get_cursor_row(), 8);
+    display_text(" seconds", get_cursor_row(), 15);
+}
+void get_disk_info(void) {
+    uint8_t num_drives;
+    __asm__ __volatile__(
+        "int $0x13"
+        : "=b"(num_drives)
+        : "a"(0x0800)
+    );
+
+    char buffer[32];
+    itoa(num_drives, buffer, 10);
+    display_text("Disk Drives: ", get_cursor_row(), 0);
+    display_text(buffer, get_cursor_row(), 13);
+}
+void get_system_time(void) {
+    uint8_t hours, minutes, seconds;
+    outb(0x70, 0x04); // Get hours
+    hours = inb(0x71);
+    outb(0x70, 0x02); // Get minutes
+    minutes = inb(0x71);
+    outb(0x70, 0x00); // Get seconds
+    seconds = inb(0x71);
+
+    char buffer[32];
+    snprintf(buffer, sizeof(buffer), "Time: " + hours + minutes, hours, minutes);
+    display_text(buffer, get_cursor_row(), 0);
+}
+
 // Execute commands (extended with tictactoe)
 void execute_command(const char *command) {
     if (strcmp(command, "cls") == 0) {
@@ -598,6 +767,16 @@ void execute_command(const char *command) {
         } else {
             display_text("Usage: setcolor <fg> <bg>", get_cursor_row(), 0);
         }
+    } else if (strcmp(command, "cpuinfo") == 0) {
+        get_cpu_info();
+    } else if (strcmp(command, "meminfo") == 0) {
+        get_memory_info();
+    } else if (strcmp(command, "uptime") == 0) {
+        get_uptime();
+    } else if (strcmp(command, "diskinfo") == 0) {
+        get_disk_info();
+    } else if (strcmp(command, "sysclock") == 0) {
+        get_system_time();
     } else if (strcmp(command, "shutdown") == 0) {
         shutdown_system(); // Call shutdown
     } else if (strcmp(command, "help") == 0) {
@@ -616,12 +795,20 @@ void execute_command(const char *command) {
         display_text("var <name> <value> - assign a value to a variable", get_cursor_row() + 12, 0);
         display_text("showvars - Displays all defined variables and their values", get_cursor_row() + 13, 0);
         display_text("fill <char> <fg_color> <bg_color> <height> <width> - Fills a specified area with a character and colors", get_cursor_row() + 14, 0);
+        display_text("reboot - reboot", get_cursor_row() + 15, 0);
+        display_text("cpuinfo - cpu info", get_cursor_row() + 16, 0);
+        display_text("meminfo - memory info", get_cursor_row() + 17, 0);
+        display_text("uptime - uptime", get_cursor_row() + 18, 0);
+        display_text("sysclock - clock", get_cursor_row() + 19, 0);
+        display_text("diskinfo - disk info", get_cursor_row() + 20, 0);
 
         // Move cursor below the displayed text
-        cursor_pos = (get_cursor_row() + 16) * SCREEN_WIDTH; // 5 lines of help text
+        cursor_pos = (get_cursor_row() + 22) * SCREEN_WIDTH; // 5 lines of help text
         update_cursor(cursor_pos);
     } else if (strcmp(command, "showvars") == 0) {
         display_variables(); // Show all variables
+    } else if (strcmp(command, "reboot") == 0) {
+        reboot_system();
     } else if (strncmp(command, "fill ", 5) == 0) {
         clear_screen();
         char *args = (char *)command + 5;
@@ -772,8 +959,8 @@ void init_system(void) {
 // Main kernel entry point
 void kmain(void) {
     init_system();
+    display_text(splash_screen, 0, (SCREEN_WIDTH - strlen(splash_screen)) / 2);
     while (1) {
         handle_keyboard(); // Poll for keyboard input
-        display_text(splash_screen, 0, (SCREEN_WIDTH - strlen(splash_screen)) / 2);
     }
 }
