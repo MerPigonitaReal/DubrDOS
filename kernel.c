@@ -1,7 +1,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h> // For strcmp, strtok, atoi
 
 // Constants
 #define VIDEO_MEMORY 0xb8000
